@@ -7,7 +7,8 @@
  */
 var wrappers = exports;
 
-var Message = require("./message");
+var Message = require("./message"),
+    util    = require("./util/minimal");
 
 /**
  * From object converter part of an {@link IWrapper}.
@@ -38,13 +39,13 @@ var Message = require("./message");
 // Custom wrapper for Any
 wrappers[".google.protobuf.Any"] = {
 
-    fromObject: function(object) {
+    fromObject: function(object, depth) {
 
         // unwrap value type if mapped
         if (object && object["@type"]) {
              // Only use fully qualified type name after the last '/'
             var name = object["@type"].substring(object["@type"].lastIndexOf("/") + 1);
-            var type = this.lookup(name);
+            var type = this.lookup(name, [ this.constructor ]);
             /* istanbul ignore else */
             if (type) {
                 // type_url does not accept leading "."
@@ -56,36 +57,39 @@ wrappers[".google.protobuf.Any"] = {
                 }
                 return this.create({
                     type_url: type_url,
-                    value: type.encode(type.fromObject(object)).finish()
+                    value: type.encode(type.fromObject(object, depth === undefined ? 1 : depth + 1)).finish()
                 });
             }
         }
 
-        return this.fromObject(object);
+        return this.fromObject(object, depth);
     },
 
-    toObject: function(message, options) {
+    toObject: function(message, options, depth) {
+        if (depth === undefined)
+            depth = 0;
+        if (depth > util.recursionLimit)
+            throw Error("max depth exceeded");
 
         // Default prefix
         var googleApi = "type.googleapis.com/";
         var prefix = "";
         var name = "";
-
         // decode value if requested and unmapped
         if (options && options.json && message.type_url && message.value) {
             // Only use fully qualified type name after the last '/'
             name = message.type_url.substring(message.type_url.lastIndexOf("/") + 1);
             // Separate the prefix used
             prefix = message.type_url.substring(0, message.type_url.lastIndexOf("/") + 1);
-            var type = this.lookup(name);
+            var type = this.lookup(name, [ this.constructor ]);
             /* istanbul ignore else */
             if (type)
-                message = type.decode(message.value);
+                message = type.decode(message.value, undefined, undefined, depth + 1);
         }
 
         // wrap value if unmapped
         if (!(message instanceof this.ctor) && message instanceof Message) {
-            var object = message.$type.toObject(message, options);
+            var object = message.$type.toObject(message, options, depth + 1);
             var messageName = message.$type.fullName[0] === "." ?
                 message.$type.fullName.slice(1) : message.$type.fullName;
             // Default to type.googleapis.com prefix if no prefix is used
@@ -97,6 +101,6 @@ wrappers[".google.protobuf.Any"] = {
             return object;
         }
 
-        return this.toObject(message, options);
+        return this.toObject(message, options, depth);
     }
 };

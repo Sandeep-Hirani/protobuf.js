@@ -62,42 +62,28 @@ exports.traverseResolved = function traverseResolved(current, fn) {
         traverseResolved(current.resolvedResponseType, fn);
 };
 
-exports.inspect = function inspect(object, indent) {
-    if (!object)
-        return "";
-    var chalk = require("chalk");
-    var sb = [];
-    if (!indent)
-        indent = "";
-    var ind = indent ? indent.substring(0, indent.length - 2) + "└ " : "";
-    sb.push(
-        ind + chalk.bold(object.toString()) + (object.visible ? " (visible)" : ""),
-        indent + chalk.gray("parent: ") + object.parent
-    );
-    if (object instanceof protobuf.Field) {
-        if (object.extend !== undefined)
-            sb.push(indent + chalk.gray("extend: ") + object.extend);
-        if (object.partOf)
-            sb.push(indent + chalk.gray("oneof : ") + object.oneof);
-    }
-    sb.push("");
-    if (object.fieldsArray)
-        object.fieldsArray.forEach(function(field) {
-            sb.push(inspect(field, indent + "  "));
-        });
-    if (object.oneofsArray)
-        object.oneofsArray.forEach(function(oneof) {
-            sb.push(inspect(oneof, indent + "  "));
-        });
-    if (object.methodsArray)
-        object.methodsArray.forEach(function(service) {
-            sb.push(inspect(service, indent + "  "));
-        });
-    if (object.nestedArray)
-        object.nestedArray.forEach(function(nested) {
-            sb.push(inspect(nested, indent + "  "));
-        });
-    return sb.join("\n");
+exports.isEsmWrapper = function isEsmWrapper(wrap) {
+    return wrap === "esm" || wrap === "es6";
+};
+
+var env = process.env; // eslint-disable-line no-process-env
+var colorEnabled =
+    env.NO_COLOR === undefined &&
+    env.FORCE_COLOR !== "0" &&
+    (env.FORCE_COLOR !== undefined || process.stderr && process.stderr.isTTY);
+
+exports.color = colorEnabled ? {
+    reset: "\x1b[0m",
+    bold: "\x1b[1m",
+    gray: "\x1b[90m",
+    green: "\x1b[32m",
+    white: "\x1b[37m"
+} : {
+    reset: "",
+    bold: "",
+    gray: "",
+    green: "",
+    white: ""
 };
 
 exports.wrap = function(OUTPUT, options) {
@@ -111,11 +97,18 @@ exports.wrap = function(OUTPUT, options) {
         wrap = fs.readFileSync(path.resolve(process.cwd(), name)).toString("utf8");
     }
     wrap = wrap.replace(/\$DEPENDENCY/g, JSON.stringify(options.dependency || "protobufjs"));
+    wrap = wrap.replace(/( *)\$DEFAULT_EXPORT/g, function($0, $1) {
+        var defaultExport = options.defaultExport || "";
+        if (!defaultExport)
+            return $1;
+        defaultExport = defaultExport.replace(/\r?\n/g, "\n");
+        return $1.length ? defaultExport.replace(/^/mg, $1) : defaultExport;
+    });
     wrap = wrap.replace(/( *)\$OUTPUT;/, function($0, $1) {
         return $1.length ? OUTPUT.replace(/^/mg, $1) : OUTPUT;
     });
     if (options.lint !== "")
-        wrap = "/*" + options.lint + "*/\n" + wrap;
+        wrap = "/*" + String(options.lint).replace(/\*\//g, "* /") + "*/\n" + wrap;
     return wrap.replace(/\r?\n/g, "\n");
 };
 

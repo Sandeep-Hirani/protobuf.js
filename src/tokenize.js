@@ -197,9 +197,7 @@ function tokenize(source, alternateCommentMode) {
 
         // see if remaining line matches comment pattern
         var lineText = source.substring(startOffset, endOffset);
-        // look for 1 or 2 slashes since startOffset would already point past
-        // the first slash that started the comment.
-        var isComment = /^\s*\/{1,2}/.test(lineText);
+        var isComment = /^\s*\/\//.test(lineText);
         return isComment;
     }
 
@@ -227,6 +225,7 @@ function tokenize(source, alternateCommentMode) {
             curr,
             start,
             isDoc,
+            nextLineIsComment,
             isLeadingComment = offset === 0;
         do {
             if (offset === length)
@@ -268,7 +267,7 @@ function tokenize(source, alternateCommentMode) {
                         // check for double-slash comments, consolidating consecutive lines
                         start = offset;
                         isDoc = false;
-                        if (isDoubleSlashCommentLine(offset)) {
+                        if (isDoubleSlashCommentLine(offset - 1)) {
                             isDoc = true;
                             do {
                                 offset = findEndOfLine(offset);
@@ -280,7 +279,11 @@ function tokenize(source, alternateCommentMode) {
                                     // Trailing comment cannot not be multi-line
                                     break;
                                 }
-                            } while (isDoubleSlashCommentLine(offset));
+                                nextLineIsComment = isDoubleSlashCommentLine(offset);
+                                if (nextLineIsComment) {
+                                    line++;
+                                }
+                            } while (nextLineIsComment);
                         } else {
                             offset = Math.min(length, findEndOfLine(offset) + 1);
                         }

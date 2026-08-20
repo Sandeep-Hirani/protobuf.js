@@ -3,7 +3,15 @@ module.exports = Enum;
 
 // extends ReflectionObject
 var ReflectionObject = require("./object");
-((Enum.prototype = Object.create(ReflectionObject.prototype)).constructor = Enum).className = "Enum";
+Enum.prototype = Object.create(ReflectionObject.prototype, {
+    constructor: {
+        value: Enum,
+        writable: true,
+        enumerable: false,
+        configurable: true
+    }
+});
+Enum.className = "Enum";
 
 var Namespace = require("./namespace"),
     util = require("./util");
@@ -17,7 +25,7 @@ var Namespace = require("./namespace"),
  * @param {Object.<string,number>} [values] Enum values as an object, by name
  * @param {Object.<string,*>} [options] Declared options
  * @param {string} [comment] The comment for this enum
- * @param {Object.<string,string>} [comments] The value comments for this enum
+ * @param {Object.<string,string|null>} [comments] The value comments for this enum
  * @param {Object.<string,Object<string,*>>|undefined} [valuesOptions] The value options for this enum
  */
 function Enum(name, values, options, comment, comments, valuesOptions) {
@@ -30,7 +38,7 @@ function Enum(name, values, options, comment, comments, valuesOptions) {
      * Enum values by id.
      * @type {Object.<number,string>}
      */
-    this.valuesById = {};
+    this.valuesById = Object.create(null);
 
     /**
      * Enum values by name.
@@ -46,7 +54,7 @@ function Enum(name, values, options, comment, comments, valuesOptions) {
 
     /**
      * Value comment texts, if any.
-     * @type {Object.<string,string>}
+     * @type {Object.<string,string|null>}
      */
     this.comments = comments || {};
 
@@ -55,6 +63,12 @@ function Enum(name, values, options, comment, comments, valuesOptions) {
      * @type {Object<string, Object<string, *>>|undefined}
      */
     this.valuesOptions = valuesOptions;
+
+    /**
+     * Resolved values features, if any
+     * @type {Object<string, Object<string, *>>|undefined}
+     */
+    this._valuesFeatures = {};
 
     /**
      * Reserved ranges, if any.
@@ -68,15 +82,38 @@ function Enum(name, values, options, comment, comments, valuesOptions) {
 
     if (values)
         for (var keys = Object.keys(values), i = 0; i < keys.length; ++i)
-            if (typeof values[keys[i]] === "number") // use forward entries only
-                this.valuesById[ this.values[keys[i]] = values[keys[i]] ] = keys[i];
+            if (keys[i] !== "__proto__" && typeof values[keys[i]] === "number") { // use forward entries only
+                this.values[keys[i]] = values[keys[i]];
+                if (this.valuesById[values[keys[i]]] === undefined)
+                    this.valuesById[values[keys[i]]] = keys[i];
+            }
 }
+
+/**
+ * @override
+ */
+Enum.prototype._resolveFeatures = function _resolveFeatures(edition) {
+    edition = this._edition || edition;
+    ReflectionObject.prototype._resolveFeatures.call(this, edition);
+
+    Object.keys(this.values).forEach(key => {
+        var parentFeaturesCopy = util.merge({}, this._features);
+        this._valuesFeatures[key] = util.merge(parentFeaturesCopy, this.valuesOptions && this.valuesOptions[key] && this.valuesOptions[key].features || {});
+    });
+
+    return this;
+};
 
 /**
  * Enum descriptor.
  * @interface IEnum
+ * @property {string} [edition] Edition
  * @property {Object.<string,number>} values Enum values
  * @property {Object.<string,*>} [options] Enum options
+ * @property {Object.<string,Object.<string,*>>} [valuesOptions] Enum value options
+ * @property {Array.<number[]|string>} [reserved] Reserved ranges
+ * @property {string|null} [comment] Enum comment
+ * @property {Object.<string,string|null>} [comments] Value comments
  */
 
 /**
@@ -87,8 +124,11 @@ function Enum(name, values, options, comment, comments, valuesOptions) {
  * @throws {TypeError} If arguments are invalid
  */
 Enum.fromJSON = function fromJSON(name, json) {
-    var enm = new Enum(name, json.values, json.options, json.comment, json.comments);
+    var enm = new Enum(name, json.values, json.options, json.comment, json.comments, json.valuesOptions);
     enm.reserved = json.reserved;
+    if (json.edition)
+        enm._edition = json.edition;
+    enm._defaultEdition = "proto3";  // For backwards-compatibility.
     return enm;
 };
 
@@ -100,6 +140,7 @@ Enum.fromJSON = function fromJSON(name, json) {
 Enum.prototype.toJSON = function toJSON(toJSONOptions) {
     var keepComments = toJSONOptions ? Boolean(toJSONOptions.keepComments) : false;
     return util.toObject([
+        "edition"       , this._editionToJSON(),
         "options"       , this.options,
         "valuesOptions" , this.valuesOptions,
         "values"        , this.values,
@@ -127,6 +168,9 @@ Enum.prototype.add = function add(name, id, comment, options) {
 
     if (!util.isInteger(id))
         throw TypeError("id must be an integer");
+
+    if (name === "__proto__")
+        return this;
 
     if (this.values[name] !== undefined)
         throw Error("duplicate name '" + name + "' in " + this);
